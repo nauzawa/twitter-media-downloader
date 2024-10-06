@@ -19,7 +19,9 @@ import (
 
 	"unicode/utf8"
 
-	twitterscraper "github.com/imperatrona/twitter-scraper"
+	// twitterscraper "github.com/imperatrona/twitter-scraper"
+	twitterscraper "twmd/twitter-scraper"
+
 	"github.com/mmpx12/optionparser"
 	"golang.org/x/term"
 )
@@ -401,13 +403,14 @@ func getFormat(tweet interface{}) string {
 }
 
 func main() {
-	var nbr, single, output string
+	var nbr, since, single, output string
 	var retweet, all, printversion, nologo, login, loginp, twofa bool
 	op := optionparser.NewOptionParser()
 	op.Banner = "twmd: Apiless twitter media downloader\n\nUsage:"
 	op.On("-u", "--user USERNAME", "User you want to download", &usr)
 	op.On("-t", "--tweet TWEET_ID", "Single tweet to download", &single)
 	op.On("-n", "--nbr NBR", "Number of tweets to download", &nbr)
+	op.On("-S", "--since UNIXTIME", "Download tweets since the specified UNIX time", &since)
 	op.On("-i", "--img", "Download images only", &imgs)
 	op.On("-v", "--video", "Download videos only", &vidz)
 	op.On("-a", "--all", "Download images and videos", &all)
@@ -520,13 +523,14 @@ func main() {
 		os.MkdirAll(output+"/img", os.ModePerm)
 	}
 	nbrs, _ := strconv.Atoi(nbr)
+	sinces, _ := strconv.Atoi(since)
 	wg := sync.WaitGroup{}
 
 	var tweets <-chan *twitterscraper.TweetResult
 	if onlymtw {
-		tweets = scraper.GetMediaTweets(context.Background(), usr, nbrs)
+		tweets = scraper.GetMediaTweets(context.Background(), usr, nbrs, sinces)
 	} else {
-		tweets = scraper.GetTweets(context.Background(), usr, nbrs)
+		tweets = scraper.GetTweets(context.Background(), usr, nbrs, sinces)
 	}
 
 	for tweet := range tweets {
