@@ -43,6 +43,13 @@ var (
 	datefmt = "2006-01-02"
 )
 
+func _formatOutput(status string, unixtime int64, date string, filename string, text string) string {
+	if text == "" {
+		return fmt.Sprintf("%-16s\t%d\t%s\t%s", status, unixtime, date, filename)
+	}
+	return fmt.Sprintf("%-16s\t%d\t%s\t%s\t%s", status, unixtime, date, filename, text)
+}
+
 func download(wg *sync.WaitGroup, tweet interface{}, url string, filetype string, output string, dwn_type string) {
 	defer wg.Done()
 	segments := strings.Split(url, "/")
@@ -60,6 +67,18 @@ func download(wg *sync.WaitGroup, tweet interface{}, url string, filetype string
 		time.Sleep(2 * time.Millisecond)
 		return
 	}
+
+	var timestamp int64
+	switch t := tweet.(type) {
+	case *twitterscraper.TweetResult:
+		timestamp = t.Timestamp
+	case *twitterscraper.Tweet:
+		timestamp = t.Timestamp
+	default:
+	}
+	timestamp_unixtime := time.Unix(timestamp, 0)
+	timestamp_date := timestamp_unixtime.Format("2006-01-02 15:04:05")
+
 	req, err := http.NewRequest("GET", url, nil)
 	req.Header.Add("User-Agent", "Mozilla/5.0 (X11; Linux x86_64)")
 	resp, err := client.Do(req)
@@ -68,12 +87,12 @@ func download(wg *sync.WaitGroup, tweet interface{}, url string, filetype string
 		defer resp.Body.Close()
 	}
 	if err != nil {
-		fmt.Println("error")
+		fmt.Println(_formatOutput("error", timestamp_unixtime.Unix(), timestamp_date, name, err.Error()))
 		return
 	}
 
 	if resp.StatusCode != 200 {
-		fmt.Println("error")
+		fmt.Println(_formatOutput("error", timestamp_unixtime.Unix(), timestamp_date, name, "StatusCode "+strconv.Itoa(resp.StatusCode)))
 		return
 	}
 
@@ -82,7 +101,7 @@ func download(wg *sync.WaitGroup, tweet interface{}, url string, filetype string
 	if dwn_type == "user" {
 		if update {
 			if _, err := os.Stat(output + "/" + filetype + "/" + name); !errors.Is(err, os.ErrNotExist) {
-				fmt.Println(name + ": already exists")
+				fmt.Println(_formatOutput("Already exists", timestamp_unixtime.Unix(), timestamp_date, name, ""))
 				return
 			}
 		}
@@ -103,7 +122,7 @@ func download(wg *sync.WaitGroup, tweet interface{}, url string, filetype string
 		f, _ = os.Create(output + "/" + name)
 	}
 	io.Copy(f, resp.Body)
-	fmt.Println("Downloaded " + name)
+	fmt.Println(_formatOutput("Downloaded", timestamp_unixtime.Unix(), timestamp_date, name, ""))
 }
 
 func videoUser(wait *sync.WaitGroup, tweet *twitterscraper.TweetResult, output string, rt bool) {
