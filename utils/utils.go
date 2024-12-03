@@ -15,8 +15,10 @@ import (
 	"time"
 
 	"github.com/andlabs/ui"
-	_ "github.com/andlabs/ui/winmanifest"
-	twitterscraper "github.com/n0madic/twitter-scraper"
+	// _ "github.com/andlabs/ui/winmanifest"
+
+	// twitterscraper "github.com/n0madic/twitter-scraper"
+	twitterscraper "twmd/twitter-scraper"
 )
 
 type Opts struct {
