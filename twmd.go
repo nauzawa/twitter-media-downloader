@@ -19,7 +19,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	twitterscraper "github.com/imperatrona/twitter-scraper"
+	twitterscraper "github.com/jeffrey12cali/twitter-scraper"
 	"github.com/mmpx12/optionparser"
 )
 
@@ -33,7 +33,7 @@ var (
 	vidz    bool
 	imgs    bool
 	urlOnly bool
-	version = "1.14.2"
+	version = "1.15.0"
 	scraper *twitterscraper.Scraper
 	client  *http.Client
 	size    = "orig"
