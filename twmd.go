@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,14 +17,12 @@ import (
 	"strings"
 	"sync"
 	"time"
-
 	"unicode/utf8"
 
-	// twitterscraper "github.com/imperatrona/twitter-scraper"
+	// twitterscraper "github.com/jeffrey12cali/twitter-scraper"
 	twitterscraper "twmd/twitter-scraper"
 
 	"github.com/mmpx12/optionparser"
-	"golang.org/x/term"
 )
 
 var (
@@ -36,7 +35,7 @@ var (
 	vidz    bool
 	imgs    bool
 	urlOnly bool
-	version = "1.13.6"
+	version = "1.15.0"
 	scraper *twitterscraper.Scraper
 	client  *http.Client
 	size    = "orig"
@@ -97,7 +96,6 @@ func download(wg *sync.WaitGroup, tweet interface{}, url string, filetype string
 	}
 
 	var f *os.File
-	defer f.Close()
 	if dwn_type == "user" {
 		if update {
 			if _, err := os.Stat(output + "/" + filetype + "/" + name); !errors.Is(err, os.ErrNotExist) {
@@ -121,6 +119,7 @@ func download(wg *sync.WaitGroup, tweet interface{}, url string, filetype string
 		}
 		f, _ = os.Create(output + "/" + name)
 	}
+	defer f.Close()
 	io.Copy(f, resp.Body)
 	fmt.Println(_formatOutput("Downloaded", timestamp_unixtime.Unix(), timestamp_date, name, ""))
 }
@@ -202,7 +201,6 @@ func photoSingle(tweet *twitterscraper.Tweet, output string) {
 	if len(tweet.Photos) > 0 {
 		wg := sync.WaitGroup{}
 		for _, i := range tweet.Photos {
-			fmt.Println(i.URL)
 			var url string
 			if !strings.Contains(i.URL, "video_thumb/") {
 				if size == "orig" || size == "small" {
@@ -223,35 +221,55 @@ func photoSingle(tweet *twitterscraper.Tweet, output string) {
 	}
 }
 
-func askPass(loginp, twofa bool) {
-	for {
-		var username string
-		var pass string
-		fmt.Printf("username: ")
-		fmt.Scanln(&username)
-		fmt.Printf("password: ")
-		if loginp {
-			fmt.Scanln(&pass)
-		} else {
-			password, _ := term.ReadPassword(int(os.Stdin.Fd()))
-			fmt.Println()
-			pass = string(password)
-		}
-		if !twofa {
-			err := scraper.Login(username, pass)
-			if err != nil {
-				fmt.Println(err)
-			}
-		} else {
-			var code string
-			fmt.Printf("two-factor: ")
-			fmt.Scanln(&code)
-			fmt.Println()
-			scraper.Login(username, string(pass), code)
-		}
-		if !scraper.IsLoggedIn() {
-			fmt.Println("Bad user/pass")
+func processCookieString(cookieStr string) []*http.Cookie {
+	cookiePairs := strings.Split(cookieStr, "; ")
+	cookies := make([]*http.Cookie, 0)
+	expiresTime := time.Now().AddDate(1, 0, 0)
+
+	for _, pair := range cookiePairs {
+		parts := strings.SplitN(pair, "=", 2)
+		if len(parts) != 2 {
 			continue
+		}
+
+		name := parts[0]
+		value := parts[1]
+		value = strings.Trim(value, "\"")
+
+		cookie := &http.Cookie{
+			Name:     name,
+			Value:    value,
+			Path:     "/",
+			Domain:   ".x.com",
+			Expires:  expiresTime,
+			HttpOnly: true,
+			Secure:   true,
+		}
+
+		cookies = append(cookies, cookie)
+	}
+	return cookies
+}
+
+func askPass() {
+	for {
+		var auth_token, ct0 string
+		fmt.Println(`  ╔═══════════════════════════════════════════════════════════════╗
+  ║                                                               ║
+  ║  User/pass login is no longer supported,                      ║
+  ║  Log in using a browser and find auth_token and ct0 cookies.  ║
+  ║  (via Inspect → Storage → Cookies).                           ║
+  ║                                                               ║
+  ╚═══════════════════════════════════════════════════════════════╝`)
+		fmt.Println()
+		fmt.Printf("auth_token cookie: ")
+		fmt.Scanln(&auth_token)
+		fmt.Printf("ct0 cookie: ")
+		fmt.Scanln(&ct0)
+		scraper.SetAuthToken(twitterscraper.AuthToken{Token: auth_token, CSRFToken: ct0})
+		if !scraper.IsLoggedIn() {
+			fmt.Println("Bad Cookies.")
+			askPass()
 		}
 		cookies := scraper.GetCookies()
 		js, _ := json.Marshal(cookies)
@@ -262,19 +280,50 @@ func askPass(loginp, twofa bool) {
 	}
 }
 
-func Login(loginp, twofa bool) {
-	if _, err := os.Stat("twmd_cookies.json"); errors.Is(err, fs.ErrNotExist) {
-		askPass(loginp, twofa)
+func Login(useCookies bool) {
+	if useCookies {
+		if _, err := os.Stat("twmd_cookies.json"); errors.Is(err, fs.ErrNotExist) {
+			fmt.Print("Enter cookies string: ")
+			var cookieStr string
+			cookieStr, _ = bufio.NewReader(os.Stdin).ReadString('\n')
+			cookieStr = strings.TrimSpace(cookieStr)
+
+			cookies := processCookieString(cookieStr)
+			scraper.SetCookies(cookies)
+
+			// Save cookies to file
+			js, _ := json.MarshalIndent(cookies, "", "  ")
+			f, _ := os.OpenFile("twmd_cookies.json", os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0666)
+			defer f.Close()
+			f.Write(js)
+		} else {
+			f, _ := os.Open("twmd_cookies.json")
+			var cookies []*http.Cookie
+			json.NewDecoder(f).Decode(&cookies)
+			scraper.SetCookies(cookies)
+			fmt.Println(scraper.IsLoggedIn())
+		}
 	} else {
-		f, _ := os.Open("twmd_cookies.json")
-		var cookies []*http.Cookie
-		json.NewDecoder(f).Decode(&cookies)
-		scraper.SetCookies(cookies)
+		if _, err := os.Stat("twmd_cookies.json"); errors.Is(err, fs.ErrNotExist) {
+			askPass()
+		} else {
+			f, _ := os.Open("twmd_cookies.json")
+			var cookies []*http.Cookie
+			json.NewDecoder(f).Decode(&cookies)
+			scraper.SetCookies(cookies)
+		}
 	}
+
 	if !scraper.IsLoggedIn() {
-		askPass(loginp, twofa)
+		if useCookies {
+			fmt.Println("Invalid cookies. Please try again.")
+			os.Remove("twmd_cookies.json")
+			Login(useCookies)
+		} else {
+			askPass()
+		}
 	} else {
-		fmt.Println("Logged in")
+		fmt.Println("Logged in.")
 	}
 }
 
@@ -316,117 +365,57 @@ func getFormat(tweet interface{}) string {
 		return ""
 	}
 
-	formatParts := strings.Split(format, " ")
-
-	pattern := `[/\\:*?\"<>|]`
-
+	pattern := `[/\\:*?"<>|]`
 	regex, err := regexp.Compile(pattern)
 	if err != nil {
 		fmt.Println("Error compiling regular expression:", err)
 		return ""
 	}
 
-	processText := func(text string, remainingChars int) string {
-		result := ""
-		for _, char := range text {
-			charStr := string(char)
-			if regex.MatchString(charStr) {
-				if utf8.RuneCountInString(result)+1 > remainingChars {
-					break
-				}
-				result += "_"
-				remainingChars--
-			} else if utf8.RuneCountInString(result)+1 <= remainingChars {
-				result += charStr
-				remainingChars--
-			} else {
-				break
-			}
-		}
-		return result
+	replacer := map[string]string{}
+
+	if tweetResult != nil {
+		replacer["{DATE}"] = time.Unix(tweetResult.Timestamp, 0).Format(datefmt)
+		replacer["{NAME}"] = tweetResult.Name
+		replacer["{USERNAME}"] = tweetResult.Username
+		replacer["{TITLE}"] = sanitizeText(tweetResult.Text, regex, 255)
+		replacer["{ID}"] = tweetResult.ID
+	} else if tweetObj != nil {
+		replacer["{DATE}"] = time.Unix(tweetObj.Timestamp, 0).Format(datefmt)
+		replacer["{NAME}"] = tweetObj.Name
+		replacer["{USERNAME}"] = tweetObj.Username
+		replacer["{TITLE}"] = sanitizeText(tweetObj.Text, regex, 255)
+		replacer["{ID}"] = tweetObj.ID
 	}
 
-	processPart := func(part string) {
-		switch part {
-		case "{DATE}":
-			var timestamp int64
-			if tweetResult != nil {
-				timestamp = tweetResult.Timestamp
-			} else if tweetObj != nil {
-				timestamp = tweetObj.Timestamp
-			} else {
-				fmt.Println("Error converting timestamp:", err)
-				return
-			}
-			t := time.Unix(timestamp, 0)
-			if err != nil {
-				fmt.Println("Error converting timestamp:", err)
-				return
-			}
-			date := t.Format(datefmt)
-			formatNew += date
+	formatNew = format
 
-		case "{NAME}":
-			if tweetResult != nil {
-				formatNew += tweetResult.Name
-			} else if tweetObj != nil {
-				formatNew += tweetObj.Name
-			}
-
-		case "{USERNAME}":
-			if tweetResult != nil {
-				formatNew += tweetResult.Username
-			} else if tweetObj != nil {
-				formatNew += tweetObj.Username
-			}
-
-		case "{TITLE}":
-			var text string
-			var remainingChars int
-
-			if tweetResult != nil {
-				text = strings.ReplaceAll(tweetResult.Text, "/", "_")
-				remainingChars = 255 - len(formatNew) - len(tweetResult.Name) - len(tweetResult.Username) - len(tweetResult.ID)
-			} else if tweetObj != nil {
-				text = strings.ReplaceAll(tweetObj.Text, "/", "_")
-				remainingChars = 251 - len(formatNew) - len(tweetObj.ID) - 4
-			}
-
-			if text == "" {
-				formatNew += ""
-			} else if remainingChars > 0 && len(text) > remainingChars {
-				formatNew += processText(text, remainingChars)
-			} else {
-				formatNew += text
-			}
-
-		case "{ID}":
-			if tweetResult != nil {
-				formatNew += tweetResult.ID
-			} else if tweetObj != nil {
-				formatNew += tweetObj.ID
-			}
-		default:
-			fmt.Println("Invalid format part")
-			return
-		}
-	}
-
-	for i, part := range formatParts {
-		processPart(part)
-
-		if i != len(formatParts)-1 {
-			formatNew += "_"
-		}
+	for key, val := range replacer {
+		formatNew = strings.ReplaceAll(formatNew, key, val)
 	}
 
 	return formatNew
+}
 
+func sanitizeText(text string, regex *regexp.Regexp, maxLen int) string {
+	cleaned := ""
+	remaining := maxLen
+	for _, char := range text {
+		charStr := string(char)
+		if regex.MatchString(charStr) {
+			charStr = "_"
+		}
+		if utf8.RuneCountInString(cleaned)+utf8.RuneCountInString(charStr) > remaining {
+			break
+		}
+		cleaned += charStr
+	}
+	return cleaned
 }
 
 func main() {
 	var nbr, since, single, output string
-	var retweet, all, printversion, nologo, login, loginp, twofa bool
+	var retweet, all, printversion, nologo, login, useCookies bool
 	op := optionparser.NewOptionParser()
 	op.Banner = "twmd: Apiless twitter media downloader\n\nUsage:"
 	op.On("-u", "--user USERNAME", "User you want to download", &usr)
@@ -446,13 +435,12 @@ func main() {
 	op.On("-f", "--file-format FORMAT", "Formatted name for the downloaded file, {DATE} {USERNAME} {NAME} {TITLE} {ID}", &format)
 	op.On("-d", "--date-format FORMAT", "Apply custom date format. (https://go.dev/src/time/format.go)", &datefmt)
 	op.On("-L", "--login", "Login (needed for NSFW tweets)", &login)
-	op.On("-P", "--login-plaintext", "Plain text login (needed for NSFW tweets)", &loginp)
-	op.On("-2", "--2fa", "Use 2fa", &twofa)
+	op.On("-C", "--cookies", "Use cookies for authentication", &useCookies)
 	op.On("-p", "--proxy PROXY", "Use proxy (proto://ip:port)", &proxy)
 	op.On("-V", "--version", "Print version and exit", &printversion)
 	op.On("-B", "--no-banner", "Don't print banner", &nologo)
-	op.Exemple("twmd -u Spraytrains -o ~/Downlaods -a -r -n 300")
-	op.Exemple("twmd -u Spraytrains -o ~/Downlaods -R -U -n 300")
+	op.Exemple("twmd -u Spraytrains -o ~/Downloads -a -r -n 300")
+	op.Exemple("twmd -u Spraytrains -o ~/Downloads -R -U -n 300")
 	op.Exemple("twmd --proxy socks5://127.0.0.1:9050 -t 156170319961391104")
 	op.Exemple("twmd -t 156170319961391104")
 	op.Exemple("twmd -t 156170319961391104 -f \"{DATE} {ID}\"")
@@ -517,8 +505,10 @@ func main() {
 	scraper = twitterscraper.New()
 	scraper.WithReplies(true)
 	scraper.SetProxy(proxy)
-	if login || loginp {
-		Login(loginp, twofa)
+
+	// Modified login handling
+	if login || useCookies {
+		Login(useCookies)
 	}
 
 	if single != "" {
